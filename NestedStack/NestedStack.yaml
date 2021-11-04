@@ -1,0 +1,19 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Example of how to create nested stacks. Nested stacks are ways to
+reuse existing template files so you don't need to copy and paste existing code."
+Parameters:
+  TimeoutInMinutes:
+    ConstraintDescription: "must begin with a letter and contain only alphanumeric
+      characters."
+    Default: AWS::NoValue
+    Description: "Amount of time stack deployment is alotted before deployment is aborted"
+    Type: Number
+Resources:
+  myStackWithParams:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.amazonaws.com/cloudformation-templates-us-east-2/EC2ChooseAMI.template
+      TimeoutInMinutes: !Ref TimeoutInMinutes
+      Parameters:
+        InstanceType: t1.micro
+        KeyName: mykey

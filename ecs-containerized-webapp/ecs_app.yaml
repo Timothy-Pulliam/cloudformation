@@ -1,0 +1,212 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Create ECS Fargate cluster and load balanced containerized web app."
+Parameters:
+  ApplicationName:
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9\-]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric
+      characters, or hyphens.
+    Default: 'myApp'
+    Description: Name of the application. Used when setting names of Resources.
+    MaxLength: '64'
+    MinLength: '1'
+    Type: String
+  VPC:
+    Type: AWS::EC2::VPC::Id
+  SubnetA:
+    Type: AWS::EC2::Subnet::Id
+  SubnetB:
+    Type: AWS::EC2::Subnet::Id
+  ClusterName:
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_\-]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric
+      characters, hypens, or underscores.
+    Default: 'test-cluster'
+    Description: The ECS cluster name
+    MaxLength: '64'
+    MinLength: '1'
+    Type: String
+  ContainerPort:
+    Type: Number
+    Default: 80
+  LoadBalancerPort:
+    Type: Number
+    Default: 443
+  EcsTaskExecutionRoleArn:
+    Type: String
+  ImageURI:
+    AllowedPattern: ".*"
+    ConstraintDescription: "Match URI. Allow all characters."
+    Default: '123456789012.dkr.ecr.region.amazonaws.com/image:tag'
+    Description: ECR Docker image to use in ECS Task definition.
+    MaxLength: '100'
+    MinLength: '1'
+    Type: String
+  HostedZoneName:
+    Type: String
+    Default: example.com
+  Subdomain:
+    Type: String
+    Default: myservice # www, app, etc.
+  SSLCert:
+    Type: String
+    # Update with the certificate ARN from Certificate Manager, which must exist in the same region.
+    Default: 'arn:aws:acm:region:123456789012:certificate/00000000-0000-0000-0000-000000000000'
+Resources:
+  Cluster:
+    Type: 'AWS::ECS::Cluster'
+    Properties:
+      ClusterName: !Ref ClusterName
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 0
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 1
+  TaskDefintion:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Ref EcsTaskExecutionRoleArn  # Required for ECS to make API calls on your behalf (aws iam list-roles)
+      # 256 (.25 vCPU) - Available memory values: 0.5GB, 1GB, 2GB
+      # 512 (.5 vCPU) - Available memory values: 1GB, 2GB, 3GB, 4GB
+      # 1024 (1 vCPU) - Available memory values: 2GB, 3GB, 4GB, 5GB, 6GB, 7GB, 8GB
+      # 2048 (2 vCPU) - Available memory values: Between 4GB and 16GB in 1GB increments
+      # 4096 (4 vCPU) - Available memory values: Between 8GB and 30GB in 1GB increments
+      Cpu: 256  # Required for fargate, see table for acceptable values https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ecs-taskdefinition.html
+      # 0.5GB, 1GB, 2GB - Available cpu values: 256 (.25 vCPU)
+      # 1GB, 2GB, 3GB, 4GB - Available cpu values: 512 (.5 vCPU)
+      # 2GB, 3GB, 4GB, 5GB, 6GB, 7GB, 8GB - Available cpu values: 1024 (1 vCPU)
+      # Between 4GB and 16GB in 1GB increments - Available cpu values: 2048 (2 vCPU)
+      # Between 8GB and 30GB in 1GB increments - Available cpu values: 4096 (4 vCPU)
+      Memory: 512
+      # awsvpc required for fargate
+      NetworkMode: "awsvpc"
+      ContainerDefinitions:
+        - Name: !Ref ApplicationName
+          Image: !Ref ImageURI
+          # Total Cpu/Memory must be less than TaskDefinition alloted values
+          # Cpu: 256 # Optional for fargate instances
+          # Memory: 512 # Optional for fargate instances
+          Essential: true  # All tasks must have at least one essential container.
+          PortMappings:
+            -
+              ContainerPort: !Ref ContainerPort
+  ContainerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow traffic from loadbalancer to container
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http/https to loadbalancer
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref LoadBalancerPort
+          ToPort: !Ref LoadBalancerPort
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "${ApplicationName}-lb"
+      Type: "application"
+      IpAddressType: ipv4
+      Scheme: "internet-facing"
+      # You must specify subnets from at least two Availability Zones to
+      # increase the availability of your load balancer.
+      # You can specify only one subnet per Availability Zone.
+      Subnets:
+        - !Ref SubnetA
+        - !Ref SubnetB
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${ApplicationName}-tg
+      TargetType: "ip" # Fargate rquires IP target type
+      Protocol: "HTTP"
+      Port: !Ref ContainerPort  # Container Ports from TaskDefinition
+      VpcId: !Ref VPC
+  # Redirect port 80 -> LoadBalancerPort (443)
+  HttpRedirectListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: "redirect"
+          RedirectConfig:
+            Protocol: "HTTPS"
+            Port: !Ref LoadBalancerPort
+            Host: "#{host}"
+            Path: "/#{path}"
+            Query: "#{query}"
+            StatusCode: "HTTP_301"
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: "HTTP"
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: "forward"
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref LoadBalancer
+      # SslPolicy:
+      Certificates:
+        - CertificateArn: !Ref SSLCert
+      Port: !Ref LoadBalancerPort
+      Protocol: "HTTPS"
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - LoadBalancer
+      - HttpsListener
+      - HttpRedirectListener
+    Properties:
+      ServiceName: !Sub "${ApplicationName}-svc"
+      Cluster: !Ref Cluster
+      CapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 0
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 1
+      TaskDefinition: !Ref TaskDefintion
+      DesiredCount: 2
+      LoadBalancers:
+        - ContainerName: !Ref ApplicationName
+          TargetGroupArn: !Ref TargetGroup
+          ContainerPort: !Ref ContainerPort
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref ContainerSecurityGroup
+          Subnets:
+            - !Ref SubnetA
+            - !Ref SubnetB
+  DNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneName: !Sub "${HostedZoneName}."
+      Name: !Sub "${Subdomain}.${HostedZoneName}."
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt LoadBalancer.DNSName
+        HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID
+Outputs:
+  Endpoint:
+    Description: Endpoint
+    Value: !Sub "https://${DNSRecord}"

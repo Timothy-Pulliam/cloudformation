@@ -1,0 +1,28 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS CloudFormation Template used to create an S3 Bucket. Note,
+you can only delete empty buckets. If the Deletion Policy is set to Retain
+they bucket will not be deleted when the stack is deleted.'
+Parameters:
+  BucketName:
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: "must begin with a letter and contain only
+      alphanumeric characters."
+    Default: 'myBucket'
+    Description: Name of S3 Bucket
+    MaxLength: '64'
+    MinLength: '1'
+    Type: String
+Resources:
+  S3Bucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub ${BucketName}
+Outputs:
+  ARN:
+    Description: "Returns the Amazon Resource Name (ARN) of the specified bucket."
+    Value: !GetAtt S3Bucket.Arn
+  URL:
+    Description: "Returns the Amazon S3 website endpoint for the specified bucket."
+    Value: !GetAtt S3Bucket.WebsiteURL

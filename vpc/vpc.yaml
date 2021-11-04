@@ -1,0 +1,35 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS CloudFormation Template used to create a VPC'
+Parameters:
+  InstanceTenancy:
+    AllowedValues: ['default', 'dedicated']
+    ConstraintDescription: "Allowed values: default | dedicated"
+    Default: 'default'
+    Description: "default: An instance launched into the VPC runs on
+    shared hardware by default, unless you explicitly specify a different tenancy
+    during instance launch.
+    dedicated: An instance launched into the VPC is a Dedicated
+    Instance by default, unless you explicitly specify a tenancy of
+    host during instance launch. You cannot specify a tenancy of
+    default during instance launch."
+    Type: String
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      InstanceTenancy: !Ref InstanceTenancy
+      Tags:
+       - Key: env
+         Value: production
+Outputs:
+    SecurityGroup:
+      Description: "The default security group ID that is associated
+      with the VPC. For example, sg-b178e0d3."
+      Value: !GetAtt VPC.DefaultSecurityGroup
+    DefaultNetworkAcl:
+      Description: "The default network ACL ID that is associated
+      with the VPC. For example, acl-814dafe3."
+      Value: !GetAtt VPC.DefaultNetworkAcl
