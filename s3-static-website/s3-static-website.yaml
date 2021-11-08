@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Creates an S3 bucket for hosting a Static HTML/CSS website
+Parameters:
+  # The bucket name must be the same as the CNAME
+  BucketName:
+    Type: String
+    Default: mysite.example.com
+  HostedZoneName:
+    Type: String
+    Default: example.com
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      # Bucket names must be globally unique
+      BucketName: !Ref BucketName
+      AccessControl: PublicRead
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+    # don't delete bucket when deleting the stack
+    # DeletionPolicy: Retain
+    # UpdateReplacePolicy: Retain
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Id: MyPolicy
+        Version: 2012-10-17
+        Statement:
+          - Sid: PublicReadForGetBucketObjects
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref S3Bucket
+                - /*
+  DNS:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneName: !Join
+        - ''
+        - - !Ref HostedZoneName
+          - '.'
+      Comment: Add CName to point to S3 bucket endpoint.
+      RecordSets:
+      -
+        Name: !Ref BucketName
+        Type: CNAME
+        TTL: 900
+        ResourceRecords:
+        - !Join ['', !Split ['http://', !GetAtt S3Bucket.WebsiteURL ]]
+Outputs:
+  WebsiteURL:
+    Value: !GetAtt
+      - S3Bucket
+      - WebsiteURL
+    Description: URL for website hosted on S3
+  S3BucketSecureURL:
+    Value: !Join
+      - ''
+      - - 'https://'
+        - !GetAtt
+          - S3Bucket
+          - DomainName
+    Description: Name of S3 bucket to hold website content
